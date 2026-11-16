@@ -40,10 +40,38 @@ if (isJpeg && !(data[data.length - 2] === 0xff && data[data.length - 1] === 0xd9
   fail(`${src} looks truncated: JPEG does not end with the FFD9 end-of-image marker`);
 }
 
+// Pixel size from the PNG IHDR chunk or the JPEG SOF0/SOF2 marker; null if not found.
+function imageSize(buf: Buffer, png: boolean): { w: number; h: number } | null {
+  if (png) {
+    if (buf.length >= 24 && buf.toString("latin1", 12, 16) === "IHDR") {
+      return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    }
+    return null;
+  }
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) return null;
+    const marker = buf[i + 1];
+    if (marker === 0xff) { i++; continue; }
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { i += 2; continue; }
+    if (marker === 0xd9 || marker === 0xda) return null;
+    const len = buf.readUInt16BE(i + 2);
+    if (marker === 0xc0 || marker === 0xc2) {
+      return { w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+    }
+    if (len < 2) return null;
+    i += 2 + len;
+  }
+  return null;
+}
+
+const size = imageSize(data, isPng);
+const dims = size ? `, ${size.w}x${size.h}` : "";
+
 try {
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "entry.png"), data);
 } catch (e) {
   fail(`cannot write to ${outDir}: ${(e as Error).message}`);
 }
-console.log(`wrote ${join(outDir, "entry.png")} (${data.length} bytes, ${isPng ? "PNG" : "JPEG"})`);
+console.log(`wrote ${join(outDir, "entry.png")} (${data.length} bytes, ${isPng ? "PNG" : "JPEG"}${dims})`);
